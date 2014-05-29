@@ -60,13 +60,16 @@ public class MainActivity extends Activity {
 
     private RecordButton mRecordButton = null;
     private MediaRecorder mRecorder = null;
-
-    private PlayButton   mPlayButton = null;
+    
     private MediaPlayer   mPlayer = null;
     
+    private SubmitButton mSubmitButton = null;
     private DeleteButton mDeleteButton = null;
     
     private EditText editText;
+    private EditText redText;
+    private	EditText greenText;
+    private EditText blueText;
     
     private Vector<String> stringArray = new Vector<String>();
     private ArrayAdapter<String> mArrayAdapter;
@@ -98,6 +101,7 @@ public class MainActivity extends Activity {
         try {
             mPlayer.setDataSource(mFileName + "/" + id + ".3gp");
             mPlayer.prepare();
+            mPlayer.setLooping(false);
             mPlayer.start();
         } catch (IOException e) {
             Log.e(LOG_TAG, "prepare() failed");
@@ -110,6 +114,7 @@ public class MainActivity extends Activity {
     }
 
     private void startRecording(int id) {
+    	Log.e("debug", id + "");
         mRecorder = new MediaRecorder();
         mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         mRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
@@ -168,35 +173,13 @@ public class MainActivity extends Activity {
         }
     }
     
-
-    class PlayButton extends Button {
-        boolean mStartPlaying = true;
-
-        OnClickListener clicker = new OnClickListener() {
-            public void onClick(View v) {
-            	int id;
-            	try{
-            		id = Integer.parseInt(editText.getText().toString());
-            				
-	                onPlay(mStartPlaying, id);
-	                if (mStartPlaying) {
-	                    setText("Stop playing");
-	                } else {
-	                    setText("Start playing");
-	                }
-	                mStartPlaying = !mStartPlaying;
-            	} catch(Exception e){
-            		//eh
-            	}
-            }
-        };
-
-        public PlayButton(Context ctx) {
+    class SubmitButton extends Button{
+    	public SubmitButton(Context ctx) {
             super(ctx);
-            setText("Start playing");
-            setOnClickListener(clicker);
+            setText("Submit");
         }
     }
+
     
     class DeleteButton extends Button{
     	OnClickListener clicker = new OnClickListener() {
@@ -242,6 +225,27 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 0));
         
+        LinearLayout l2 = new LinearLayout(this);
+        ll.addView(l2, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        redText = new EditText(this);
+        l2.addView(redText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        greenText = new EditText(this);
+        l2.addView(greenText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        blueText = new EditText(this);
+        l2.addView(blueText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        
         mRecordButton = new RecordButton(this);
         ll.addView(mRecordButton,
             new LinearLayout.LayoutParams(
@@ -249,8 +253,8 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 0));
         
-        mPlayButton = new PlayButton(this);
-        ll.addView(mPlayButton,
+        mSubmitButton = new SubmitButton(this);
+        ll.addView(mSubmitButton,
             new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -273,7 +277,9 @@ public class MainActivity extends Activity {
 			public void onItemClick(AdapterView<?> parent, View view, int pos,
 					long id) {
 				String item = (String) listView.getItemAtPosition(pos);
+				try{
 				unregisterReceiver(mReceiver);
+				}catch (Exception e){}
 		    	BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(item.substring(item.indexOf('\n')+ 1));
 				Toast.makeText(getApplicationContext(),"You selected : " + item.substring(item.indexOf('\n')+ 1),Toast.LENGTH_SHORT).show();
 				new connectThread(device).start();
@@ -399,7 +405,7 @@ public class MainActivity extends Activity {
                     while((bytes = mmInStream.read(buffer)) != -1){
                     	for(int i = 0; i < bytes; i++){
                     		if(buffer[i] != 0){
-                    			//Log.e("BYTE", String.valueOf((char)buffer[i]));
+                    			Log.e("BYTE", String.valueOf((char)buffer[i]));
                     			if((char)buffer[i] == '*'){
                     				start = true;
                     			}
@@ -454,6 +460,7 @@ public class MainActivity extends Activity {
     		stopPlaying();
     	}
     	else if(parts[0].equals("recordstart")){
+    		Log.e("DEBUG", parts[1]);
     		startRecording(Integer.parseInt(parts[1]));
     	}
     	else if(parts[0].equals("recordend")){
