@@ -32,6 +32,7 @@ import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.os.Bundle;
 import android.os.Environment;
@@ -71,6 +72,9 @@ public class MainActivity extends Activity {
     private	EditText greenText;
     private EditText blueText;
     
+    private EditText startText;
+    private EditText endText;
+    
     private Vector<String> stringArray = new Vector<String>();
     private ArrayAdapter<String> mArrayAdapter;
     private ListView listView;
@@ -79,6 +83,8 @@ public class MainActivity extends Activity {
     private BluetoothSocket mBluetoothSocket = null;
     private IntentFilter filter;
     private BroadcastReceiver mReceiver;
+    
+    private communicationThread ct;
 
     private void onRecord(boolean start, int id) {
         if (start) {
@@ -174,9 +180,38 @@ public class MainActivity extends Activity {
     }
     
     class SubmitButton extends Button{
+    	OnClickListener clicker = new OnClickListener(){
+    		public void onClick(View v){
+    			try{
+    				if(redText.getText().length() == 0 || greenText.getText().length() == 0 ||
+    						blueText.getText().length() == 0 || editText.getText().length() == 0){
+    					throw new Exception();
+    				}
+    				int r = Integer.parseInt(redText.getText().toString());
+    				int g = Integer.parseInt(greenText.getText().toString());
+    				int b = Integer.parseInt(blueText.getText().toString());
+    				long c = rgbToLong(r, g, b);
+    				String id = editText.getText().toString();
+    				long start = Long.parseLong(startText.getText().toString());
+    				String e = endText.getText().toString();
+    				long end;
+    				if(e.length() == 0){
+    					end = -1;
+    				}
+    				else{
+    					end = Long.parseLong(e);
+    				}
+    				ct.write("*newreminder;" + id + ";" + c + ";" + start + ";" + end + "#");
+    				
+    			} catch(Exception e){
+    				Toast.makeText(getApplicationContext(),"Message not sent",Toast.LENGTH_SHORT).show();
+    				}
+    		}
+    	};
     	public SubmitButton(Context ctx) {
             super(ctx);
             setText("Submit");
+            setOnClickListener(clicker);
         }
     }
 
@@ -219,14 +254,33 @@ public class MainActivity extends Activity {
 
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
+        
+        LinearLayout l0 = new LinearLayout(this);
+        ll.addView(l0, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        
+        TextView idText = new TextView(this);
+        idText.setText("ID:");
+        l0.addView(idText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
         editText = new EditText(this);
-        ll.addView(editText, new LinearLayout.LayoutParams(
+        l0.addView(editText, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 0));
         
         LinearLayout l2 = new LinearLayout(this);
         ll.addView(l2, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        TextView rgbText = new TextView(this);
+        rgbText.setText("RGB:");
+        l2.addView(rgbText, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 0));
@@ -242,6 +296,28 @@ public class MainActivity extends Activity {
                 0));
         blueText = new EditText(this);
         l2.addView(blueText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        
+        LinearLayout l3 = new LinearLayout(this);
+        ll.addView(l3, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        TextView timeText = new TextView(this);
+        timeText.setText("Start and end times:");
+        l3.addView(timeText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        startText = new EditText(this);
+        l3.addView(startText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                0));
+        endText = new EditText(this);
+        l3.addView(endText, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 0));
@@ -501,6 +577,10 @@ public class MainActivity extends Activity {
     			";" + ((c.get(Calendar.DAY_OF_MONTH) > 9) ? c.get(Calendar.DAY_OF_MONTH) : ("0" + c.get(Calendar.DAY_OF_MONTH))) +
     			";" + ((c.get(Calendar.MONTH) > 9) ? c.get(Calendar.MONTH) : ("0" + c.get(Calendar.MONTH))) +
     			";" + c.get(Calendar.YEAR) + "#";
+    }
+    
+    private long rgbToLong(int r, int g, int b){
+    	return ((long)r << 16) | ((long)g <<  8) | b;
     }
 
 }
