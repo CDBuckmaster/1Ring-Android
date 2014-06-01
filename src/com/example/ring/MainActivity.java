@@ -1,12 +1,16 @@
 package com.example.ring;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.UUID;
 import java.util.Vector;
@@ -36,6 +40,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.view.View;
@@ -53,11 +60,19 @@ public class MainActivity extends Activity {
 	private final int REQUEST_ENABLE_BT = 8000;
 	//private final UUID APPLICATION_UUID = UUID.fromString("b9ed3f50-de50-11e3-8b68-0800200c9a66");
 	private final UUID APPLICATION_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+	private final int ADD_REMINDER = 1;
+	private final int DELETE_REMINDER = 2;
+	private final int ERROR = 3;
 
 	private static final String LOG_TAG = "AudioRecordTest";
     private static String mFileName = null;
     
     private static int numFiles = -1;
+    
+    private boolean connected = false;
+    private HashMap<Long, Reminder> reminders = new HashMap<Long, Reminder>();
+    
+    private Handler incomingHandler;
 
     private RecordButton mRecordButton = null;
     private MediaRecorder mRecorder = null;
@@ -84,9 +99,10 @@ public class MainActivity extends Activity {
     private IntentFilter filter;
     private BroadcastReceiver mReceiver;
     
-    private communicationThread ct;
+    private OutThread outThread;
+    private InThread inThread;
 
-    private void onRecord(boolean start, int id) {
+    private void onRecord(boolean start, long id) {
         if (start) {
             startRecording(id);
         } else {
@@ -102,7 +118,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void startPlaying(int id) {
+    private void startPlaying(long id) {
         mPlayer = new MediaPlayer();
         try {
             mPlayer.setDataSource(mFileName + "/" + id + ".3gp");
@@ -119,7 +135,7 @@ public class MainActivity extends Activity {
         mPlayer = null;
     }
 
-    private void startRecording(int id) {
+    private void startRecording(long id) {
     	Log.e("debug", id + "");
         mRecorder = new MediaRecorder();
         mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -142,7 +158,7 @@ public class MainActivity extends Activity {
         mRecorder = null;
     }
     
-    private void deleteRecording(int id){
+    private void deleteRecording(long id){
     	File file = new File(mFileName + "/" + id + ".3gp");
     	file.delete();
     }
@@ -182,30 +198,37 @@ public class MainActivity extends Activity {
     class SubmitButton extends Button{
     	OnClickListener clicker = new OnClickListener(){
     		public void onClick(View v){
-    			try{
-    				if(redText.getText().length() == 0 || greenText.getText().length() == 0 ||
-    						blueText.getText().length() == 0 || editText.getText().length() == 0){
-    					throw new Exception();
-    				}
-    				int r = Integer.parseInt(redText.getText().toString());
-    				int g = Integer.parseInt(greenText.getText().toString());
-    				int b = Integer.parseInt(blueText.getText().toString());
-    				long c = rgbToLong(r, g, b);
-    				String id = editText.getText().toString();
-    				long start = Long.parseLong(startText.getText().toString());
-    				String e = endText.getText().toString();
-    				long end;
-    				if(e.length() == 0){
-    					end = -1;
-    				}
-    				else{
-    					end = Long.parseLong(e);
-    				}
-    				ct.write("*newreminder;" + id + ";" + c + ";" + start + ";" + end + "#");
-    				
-    			} catch(Exception e){
-    				Toast.makeText(getApplicationContext(),"Message not sent",Toast.LENGTH_SHORT).show();
-    				}
+    			if(connected){
+	    			try{
+	    				if(redText.getText().length() == 0 || greenText.getText().length() == 0 ||
+	    						blueText.getText().length() == 0 || editText.getText().length() == 0){
+	    					throw new Exception();
+	    				}
+	    				int r = Integer.parseInt(redText.getText().toString());
+	    				int g = Integer.parseInt(greenText.getText().toString());
+	    				int b = Integer.parseInt(blueText.getText().toString());
+	    				long c = rgbToLong(r, g, b);
+	    				String id = editText.getText().toString();
+	    				long start = Long.parseLong(startText.getText().toString());
+	    				String e = endText.getText().toString();
+	    				long end;
+	    				if(e.length() == 0){
+	    					end = -1;
+	    				}
+	    				else{
+	    					end = Long.parseLong(e);
+	    				}
+	    				reminders.put(Long.parseLong(id), new Reminder(Long.parseLong(id), c, start, end));
+	    				mArrayAdapter.add("ID:" + id + " Colour:" + c);
+	    				mArrayAdapter.notifyDataSetChanged();
+	    				Message msg = outThread.outgoingHandler.obtainMessage(ADD_REMINDER, "*newreminder;" + id + ";" + c + ";" + start + ";" + end + "#");
+	    				msg.sendToTarget();
+	    				
+	    			} catch(Exception e){
+	    				Toast.makeText(getApplicationContext(),"Message not sent",Toast.LENGTH_SHORT).show();
+	    				e.printStackTrace();
+	    				}
+	    		}
     		}
     	};
     	public SubmitButton(Context ctx) {
@@ -220,9 +243,18 @@ public class MainActivity extends Activity {
     	OnClickListener clicker = new OnClickListener() {
     		public void onClick(View v) {
     			try{
-            		int id = Integer.parseInt(editText.getText().toString());
+            		long id = Long.parseLong(editText.getText().toString());
             		deleteRecording(id);
-            		
+            		reminders.remove(id);
+            		Message msg = outThread.outgoingHandler.obtainMessage(ADD_REMINDER, "*deletereminder;" + id + "#");
+    				msg.sendToTarget();
+    				for(int i = 0; i < mArrayAdapter.getCount(); i ++){
+    					String s = mArrayAdapter.getItem(i);
+    					if(s.split(" ")[0].split(":")[1].equals(String.valueOf(id))){
+    						mArrayAdapter.remove(s);
+    					}
+    				}
+    				mArrayAdapter.notifyDataSetChanged();
     			} catch(Exception e){
     				//bleh
     			}
@@ -245,7 +277,7 @@ public class MainActivity extends Activity {
         mFileName = dir.getAbsolutePath();
         //mFileName += "/audiorecordtest.3gp";
         
-        
+        fileToReminders();
     }
 
     @Override
@@ -353,12 +385,31 @@ public class MainActivity extends Activity {
 			public void onItemClick(AdapterView<?> parent, View view, int pos,
 					long id) {
 				String item = (String) listView.getItemAtPosition(pos);
-				try{
-				unregisterReceiver(mReceiver);
-				}catch (Exception e){}
-		    	BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(item.substring(item.indexOf('\n')+ 1));
-				Toast.makeText(getApplicationContext(),"You selected : " + item.substring(item.indexOf('\n')+ 1),Toast.LENGTH_SHORT).show();
-				new connectThread(device).start();
+				if(!connected){
+					try{
+					unregisterReceiver(mReceiver);
+					}catch (Exception e){}
+			    	BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(item.substring(item.indexOf('\n')+ 1));
+					Toast.makeText(getApplicationContext(),"You selected : " + item.substring(item.indexOf('\n')+ 1),Toast.LENGTH_SHORT).show();
+					new connectThread(device).start();
+					connected = true;
+		            mArrayAdapter.clear();
+		            for(long i: reminders.keySet()){
+		            	mArrayAdapter.add("ID:" + reminders.get(i).id + " Colour:" + reminders.get(i).colour);
+		            	mArrayAdapter.notifyDataSetChanged();
+		            }
+				}
+				else{
+					long iId = Long.parseLong(item.split(" ")[0].split(":")[1]);
+					Log.e("DEBUG", String.valueOf(iId));
+					reminders.remove(iId);
+					deleteRecording(iId);
+					Message msg = outThread.outgoingHandler.obtainMessage(ADD_REMINDER, "*deletereminder;" + iId + "#");
+    				msg.sendToTarget();
+    				mArrayAdapter.remove(item);
+    				mArrayAdapter.notifyDataSetChanged();
+					
+				}
 			}
         	
         });
@@ -367,6 +418,30 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         0));
+        incomingHandler = new Handler(){
+        	@Override
+        	public void handleMessage(Message msg){
+        		switch(msg.what){
+        		
+        			case ADD_REMINDER:
+        				mArrayAdapter.add((String) msg.obj);
+        				mArrayAdapter.notifyDataSetChanged();
+        				break;
+        			case DELETE_REMINDER:
+        				for(int i = 0; i < mArrayAdapter.getCount(); i ++){
+        					String s = mArrayAdapter.getItem(i);
+        					if(s.split(" ")[0].split(":")[1].equals((String) msg.obj)){
+        						mArrayAdapter.remove(s);
+        					}
+        				}
+        				mArrayAdapter.notifyDataSetChanged();
+        				break;
+        			case ERROR:
+        				break;
+        		}
+        		super.handleMessage(msg);
+        	}
+        };
         
         setContentView(ll);
         
@@ -424,7 +499,10 @@ public class MainActivity extends Activity {
     		try{
     			bs.connect();
     			//manage in a separate thread
-        		new communicationThread(bs).start();
+        		outThread = new OutThread(bs);
+        		outThread.start();
+        		inThread = new InThread(bs);
+        		inThread.start();
     		} catch(IOException e){
     			e.printStackTrace();
     			try{
@@ -447,33 +525,79 @@ public class MainActivity extends Activity {
     	}
     }
     
+    private class OutThread extends Thread{
+    	private final OutputStream mmOutStream;
+    	private final BluetoothSocket socket;
+        public Handler outgoingHandler;
+        
+        public OutThread(BluetoothSocket bs){
+        	socket = bs;
+        	OutputStream tmpOut = null;
+        	try {
+                tmpOut = socket.getOutputStream();
+            } catch (IOException e) { }
+        	
+        	mmOutStream = tmpOut;
+        }
+        
+        public void run(){
+        	write(timeMessage());
+        	for(Long r : reminders.keySet()){
+        		Log.e("dehug", "hello");
+        		Reminder rem = reminders.get(r);
+        		write("*newreminder;" + rem.id + ";" + rem.colour + ";" + 
+        		rem.startTimeLeft + ";" + rem.endTimeLeft + "#");
+        	}
+        	Looper.prepare();
+        	outgoingHandler = new Handler(){
+            	@Override
+            	public void handleMessage(Message msg){
+            		Log.e("DEBUG", (String) msg.obj);
+            		write((String) msg.obj);
+            		super.handleMessage(msg);
+            	}
+            };
+        	Looper.loop();
+        }
+        
+        public void write(String message) {
+            try {
+                mmOutStream.write(message.getBytes());
+            } catch (IOException e) { }
+        }
+     
+        /* Call this from the main activity to shutdown the connection */
+        public void cancel() {
+            try {
+                socket.close();
+            } catch (IOException e) { }
+        }
+        
+    }
     
-    private class communicationThread extends Thread{
+    
+    private class InThread extends Thread{
     	private final InputStream mmInStream;
-        private final OutputStream mmOutStream;
         private final BluetoothSocket socket;
     	
-    	public communicationThread(BluetoothSocket bs){
+    	public InThread(BluetoothSocket bs){
     		socket = bs;
     		InputStream tmpIn = null;
-            OutputStream tmpOut = null;
-            
             try {
                 tmpIn = socket.getInputStream();
-                tmpOut = socket.getOutputStream();
             } catch (IOException e) { }
      
             mmInStream = tmpIn;
-            mmOutStream = tmpOut;
+            
+            
     	}
     	
-    	public void run(){
+    	public void run(){ 
     		byte[] buffer = new byte[1024];  // buffer store for the stream
             int bytes;
-            Log.e("DEBUG","It liiiiiives");
-            write(timeMessage());
             
-            while (true) {
+            
+            while(true){
                 try {
                     // Read from the InputStream
                 	String s = "";
@@ -481,7 +605,7 @@ public class MainActivity extends Activity {
                     while((bytes = mmInStream.read(buffer)) != -1){
                     	for(int i = 0; i < bytes; i++){
                     		if(buffer[i] != 0){
-                    			Log.e("BYTE", String.valueOf((char)buffer[i]));
+                    			//Log.e("BYTE", String.valueOf((char)buffer[i]));
                     			if((char)buffer[i] == '*'){
                     				start = true;
                     			}
@@ -508,15 +632,9 @@ public class MainActivity extends Activity {
                     break;
                 }
             }
-            
             cancel();
     	}
     	
-    	public void write(String message) {
-            try {
-                mmOutStream.write(message.getBytes());
-            } catch (IOException e) { }
-        }
      
         /* Call this from the main activity to shutdown the connection */
         public void cancel() {
@@ -544,6 +662,21 @@ public class MainActivity extends Activity {
     	}
     	else if(parts[0].equals("delete")){
     		deleteRecording(Integer.parseInt(parts[1]));
+    	}
+    	else if(parts[0].equals("addreminder")){
+    		reminders.put(Long.parseLong(parts[1]), new Reminder(Long.parseLong(parts[1]),
+    				Long.parseLong(parts[2]),
+    				Long.parseLong(parts[3]),
+    				Long.parseLong(parts[4])));
+    		Message msg = incomingHandler.obtainMessage(
+    				ADD_REMINDER, "ID:" + parts[1] + " Colour:" + parts[2]);
+    		msg.sendToTarget();
+    	}
+    	else if(parts[0].equals("deletereminder")){
+    		reminders.remove(Long.parseLong(parts[1]));
+    		Message msg = incomingHandler.obtainMessage(
+    				DELETE_REMINDER, parts[1]);
+    		msg.sendToTarget();
     	}
     }
 
@@ -582,5 +715,68 @@ public class MainActivity extends Activity {
     private long rgbToLong(int r, int g, int b){
     	return ((long)r << 16) | ((long)g <<  8) | b;
     }
+    
+    private void fileToReminders(){
+    	File sdcard = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + 
+    			"/recordings");
 
+    	//Get the text file
+    	File file = new File(sdcard,"reminders.txt");
+    	try{
+	    	FileWriter writer = new FileWriter(file, true);
+	    	writer.append("");
+	        writer.close();
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+    	//Read text from file
+    	StringBuilder text = new StringBuilder();
+
+    	try {
+    	    BufferedReader br = new BufferedReader(new FileReader(file));
+    	    String line;
+
+    	    while ((line = br.readLine()) != null) {
+    	        text.append(line);
+    	    }
+    	}
+    	catch (IOException e) {
+    	    //You'll need to add proper error handling here
+    	}
+    	
+    	if(text.length() != 0){
+    		try{
+		    	String rs[] = text.toString().split("\n");
+		    	for(String s: rs){
+		    		String parts[] = s.split(" ");
+		    		long id = Long.parseLong(parts[0].split(":")[1]);
+		    		long colour = rgbToLong(Integer.parseInt(parts[1].split(":")[1]),
+		    				Integer.parseInt(parts[2].split(":")[1]),
+		    				Integer.parseInt(parts[3].split(":")[1]));
+		    		long start = Long.parseLong(parts[4].split(":")[1]);
+		    		long end = Long.parseLong(parts[5].split(":")[1]);
+		    		reminders.put(id, new Reminder(id, colour, start, end));
+		    	}
+    		} catch(Exception e){
+    			
+    		}
+    	}
+    	
+    	Log.e("reminders", text.toString());
+    }
+
+}
+
+class Reminder{
+	public long id;
+	public long colour;
+	public long startTimeLeft;
+	public long endTimeLeft;
+	public Reminder(long id, long colour, long startTimeLeft, long endTimeLeft){
+		this.id = id;
+		this.colour = colour;
+		this.startTimeLeft =  startTimeLeft;
+		this.endTimeLeft = endTimeLeft;
+	}
 }
